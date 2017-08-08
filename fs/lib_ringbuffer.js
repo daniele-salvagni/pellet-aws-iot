@@ -9,7 +9,7 @@ let RingBuffer = {
   // rBuffer.offer("Command 2");
   // print("First command: ", rBuffer.poll());
   // ```
-  create: function(size) {
+  create: function (size) {
     return p = Object.create({
       offer: RingBuffer.offer,
       poll: RingBuffer.poll,
@@ -25,9 +25,11 @@ let RingBuffer = {
     });
   },
 
+  // PUBLIC ------------------------------------------------------------------------------
+
   // ## **`rBuffer.offer(e)`**
   // Insert an element if possible, otherwise return false.
-  offer: function(e) {
+  offer: function (e) {
     if (this._isFull()) return false;
     this.buffer[this.head] = e;
     this.head = ++this.head % this.size;
@@ -36,14 +38,14 @@ let RingBuffer = {
 
   // ## **`rBuffer.peek()`**
   // Return, but do not remove, the head of the queue.
-  peek: function() {
+  peek: function () {
     if (RingBuffer._isEmpty()) return null;
     return this.buffer[this.tail];
   },
 
   // ## **`rBuffer.poll()`**
   // Remove and return the head of the queue, if empty return null.
-  poll: function() {
+  poll: function () {
     if (RingBuffer._isEmpty()) return null;
     let e = this.buffer[this.tail];
     this.buffer[this.tail] = undefined;
@@ -51,15 +53,16 @@ let RingBuffer = {
     return e;
   },
 
+  // PRIVATE -----------------------------------------------------------------------------
+
   // Check if the buffer is empty
-  _isEmpty: function() {
-    if (this.head === this.tail) return true;
-    return false;
+  _isEmpty: function () {
+    return (this.head === this.tail) ? true : false;
   },
 
   // Check if the buffer is full
-  _isFull: function() {
-    if ((this.head + 1) % this.size === this.tail) return true;
-    return false;
+  _isFull: function () {
+    return ((this.head + 1) % this.size === this.tail) ? true : false;
   }
+
 };
