@@ -5,7 +5,7 @@
 
 <div align="center"><sub><pre>Do not use this without proper knowledge, you may risk damaging your device.</pre></sub>
 
-![Travis](https://img.shields.io/travis/daniele-salvagni/pellet-aws-iot.svg) ![ESP32](https://img.shields.io/badge/platform-esp32-1a7bbd.svg) ![Pellet](https://img.shields.io/badge/pellet-burning-5861a3.svg)
+![Status](https://img.shields.io/badge/status-development-red.svg) ![Travis](https://img.shields.io/travis/daniele-salvagni/pellet-aws-iot.svg) ![ESP32](https://img.shields.io/badge/platform-esp32-1a7bbd.svg) ![Pellet](https://img.shields.io/badge/pellet-burning-5861a3.svg)
 
 </div>
 
