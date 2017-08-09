@@ -90,10 +90,9 @@ let Pellet = {
 
     // Timeout if no response has been received
     this.timer = Timer.set(1000, false, function(that) {
-      that.timer = null;
-      that.timeout = true;
+      //that.timer = null;
+      that.error = 1;
       that.tentatives++;
-      // Retry or go to the next command in queue
       that._handleNext();
     }, this);
   },
@@ -101,34 +100,34 @@ let Pellet = {
 
   // Invoked only via callback
   _rxHandler: function (uartNo, that) {
-    let MIN_RESPONSE_BYTES = 2;
+    let MIN_RESPONSE_BYTES = 2; // All the expected responses should be 2 bytes
     // Check that this callback has been called because there is space available in the
     // rx buffer. (It could be also for space available on the tx buffer)
     let ra = UART.readAvail(uartNo);
     if (ra >= MIN_RESPONSE_BYTES) {
-      let cmd = that.commands.peek(); // The command that was sent
-      // Read the received data
+      let cmd = that.commands.peek(); // The command that made the request
       let rxData = UART.read(uartNo);
       print("Received UART data:", rxData);
 
-      // TODO: CONTINUE HERE
-      // - Implement OFFSET and MULTIPLIER
-      // - Handle responses
-      // - Create and provide a state
-
       if (!cmd) return; // We received data for no reason (or too late), exit.
+      // READ Response: CHECKSUM VALUE
+      // WRITE Response: ADDR_LSB VALUE
+      let rxChecksum = rxData[0];
+      let rxValue = rxData[1];
 
-      if (cmd[0] === that.cfg.READ) {  // READ Response: CHECKSUM VALUE
+      let chk = (cmd[0] === that.cfg.READ) ?
+        ((cmd[0] + cmd[1].mem) + cmd[1].addr + rxValue) & 0xFF :
+        cmd[1].addr[0];
 
-        let rxChecksum = rxData[0];
-        // Checksum: (OPERATION + MEMORY) + ADDR_LSB + VALUE) & 0xFF
-        let chk = ((cmd[0] + cmd[1].mem) + cmd[1].addr + rxData[1]) & 0xFF;
-
-
-      } else {  // WRITE Response: ADDR_LSB VALUE
-
+      if (rxChecksum.at(0) === chk) {
+        that.state[cmd.name] = rxValue;
+      } else {
+        that.error = 2;
       }
 
+      Timer.cancel(that.timer); // Cancel the timeout timer
+      that.tentatives++;
+      that._handleNext();
 
     }
   },
@@ -145,7 +144,7 @@ let Pellet = {
       this._transmit();
       this.error = 0;
     } else {
-      // handle the next command (if any)
+      // Handle the next command (if any)
       this.commands.poll();
       this.tentatives = 0;
       this.error = 0;
