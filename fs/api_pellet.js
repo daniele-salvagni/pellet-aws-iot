@@ -7,7 +7,6 @@ let Pellet = {
   // ## **`Pellet.create(uartNo, cfg)`**
   // Create and return a Pellet object bound to a specific UART, cfg is optional.
   create: function (uartNo, cfg) {
-    // Create an instance object from the prototype
     let instance = Object.create({
       // PUBLIC
       getState: Pellet.getState,
@@ -18,40 +17,47 @@ let Pellet = {
 
       cfg: cfg || { RAM: 0x00, EPR: 0x20, READ: 0x00, WRITE: 0x80 },
       uartNo: uartNo,
-
-      commands: RingBuffer.create(16), // Command queue
+      commands: RingBuffer.create(16), // FIFO queue for the commands to send
       state: {}, // The last updated state obtained from the device
-      busy: false, // Waiting for a response
+      busy: false, // True if waiting for a response (Half-Duplex)
+      timer: null, // The ID of the timeout timer
       error: 0 // 0: no error | 1: timeout | 2: wrong response
     });
 
     // UART Configuration
     UART.setConfig(uartNo, { baudRate: 1200, numDataBits: 8, numStopBits: 2, parity: 0 });
     UART.setRxEnabled(uartNo, true);
-    // Set UART dispatcher callback which gets invoked when there is a new data in the
-    // input buffer or when the space becomes available on the output buffer.
-    UART.setDispatcher(uartNo, Pellet._handler, instance);
-
+    UART.setDispatcher(uartNo, Pellet._rxHandler, instance);
     return instance;
   },
+
 
   // PUBLIC ------------------------------------------------------------------------------
 
   // ## **`pellet.update(uartNo)`**
   // Request to update a parameter value from the device.
   update: function (param) {
-    // READ Command: [READ, param]
+    // Offer a read command: [READ, param]
     commands.offer([this.cfg.READ, param]);
     if (!busy) this._transmit();
   },
 
+
   // ## **`pellet.change(uartNo)`**
-  // Request to change a parameter value in the device.
-  change: function (param, value ) {
-    // WRITE Command: [WRITE, param, value]
-    commands.offer([this.cfg.WRITE, param]);
+  // Request to change a parameter value in the device. Return false if invalid value.
+  change: function (param, value) {
+    // The defaults are neutral to the operation
+    let offset = param.off || 0;
+    let multiplier = param.mult || 1;
+    let byteValue = offset + (multiplier * value);
+    if (!Pellet._isValidByte(byteValue)) return false;
+
+    // Offer a write command: [WRITE, param, value]
+    commands.offer([this.cfg.WRITE, param, byteValue]);
     if (!busy) this._transmit();
+    return true;
   },
+
 
   // ## **`pellet.getState()`**
   // Return the last updated state of the device (or an empty object).
@@ -59,33 +65,32 @@ let Pellet = {
 
   },
 
+
   // PRIVATE -----------------------------------------------------------------------------
 
   // Transmit will be called from a callback OR from a timeout (if there is
   // another command queued).
   _transmit: function () {
     this.busy = true;
-    let cmd = commands.peek();
-    let req = '';
+    let cmd = this.commands.peek();
 
-    if (cmd[0] === this.cfg.READ) {
-      // We need to send a read command
-      // READ Data: (0x00 + TYPE) ADDR_LSB
-      req = chr(this.cfg.READ + cmd[1].mem) + chr(cmd[1].addr);
-    } else if (cmd[0] === this.cfg.WRITE) {
-      // We need to send a write command (needs a checksum)
-      // Chacksum: (0x80 + TYPE) + ADDR_LSB + VALUE) & 0xFF
-      let chk = ((this.cfg.WRITE + cmd[1].mem) + cmd[1].addr + cmd[2]) & 0xFF;
-      // WRITE Data: (0x80 + TYPE) ADDR_LSB VALUE CHECKSUM
-      req = chr(WRITE + cmd[1].mem) + chr(cmd[1].addr) + chr(cmd[2]) + chr(chk);
+    // READ Bytes (2): (OPERATION + MEMORY) ADDR_LSB
+    txData = chr(cmd[0] + cmd[1].mem) + chr(cmd[1].addr);
+    // If it is a write command we need to add a value and a checksum.
+    if (cmd[0] === this.cfg.WRITE) {
+      // Checksum: (OPERATION + MEMORY) + ADDR_LSB + VALUE) & 0xFF
+      let chk = ((cmd[0] + cmd[1].mem) + cmd[1].addr + cmd[2]) & 0xFF;
+      // WRITE Bytes (4): (OPERATION + MEMORY) ADDR_LSB VALUE CHECKSUM
+      txData += chr(cmd[2]) + chr(chk);
     }
 
-    UART.read(this.uartNo); // Flush RX
-    UART.write(this.uartNo, req);
+    UART.read(this.uartNo); // Empty the rx buffer
+    UART.write(this.uartNo, txData);
     UART.flush(this.uartNo);
 
     // Timeout if no response has been received
-    Timer.set(1000, false, function(that) {
+    this.timer = Timer.set(1000, false, function(that) {
+      that.timer = null;
       that.timeout = true;
       that.tentatives++;
       // Retry or go to the next command in queue
@@ -93,44 +98,41 @@ let Pellet = {
     }, this);
   },
 
-  // Invoked via callback
-  _handler: function (uartNo, that) {
+
+  // Invoked only via callback
+  _rxHandler: function (uartNo, that) {
     let MIN_RESPONSE_BYTES = 2;
     // Check that this callback has been called because there is space available in the
     // rx buffer. (It could be also for space available on the tx buffer)
     let ra = UART.readAvail(uartNo);
     if (ra >= MIN_RESPONSE_BYTES) {
-      let cmd = commands.peek(); // The command that was sent
+      let cmd = that.commands.peek(); // The command that was sent
       // Read the received data
-      // READ Response: CHECKSUM VALUE
-      // WRITE Response: ADDR_LSB VALUE
-      let res = UART.read(uartNo);
-      print("Received UART data:", res);
+      let rxData = UART.read(uartNo);
+      print("Received UART data:", rxData);
 
       // TODO: CONTINUE HERE
       // - Implement OFFSET and MULTIPLIER
       // - Handle responses
       // - Create and provide a state
 
-      if (!cmd) return; // We received data for no reason
+      if (!cmd) return; // We received data for no reason (or too late), exit.
 
-      if (cmd[0] === that.cfg.READ) { // Response to a READ command
+      if (cmd[0] === that.cfg.READ) {  // READ Response: CHECKSUM VALUE
 
-      } else { // Response to a WRITE command
+        let rxChecksum = rxData[0];
+        // Checksum: (OPERATION + MEMORY) + ADDR_LSB + VALUE) & 0xFF
+        let chk = ((cmd[0] + cmd[1].mem) + cmd[1].addr + rxData[1]) & 0xFF;
+
+
+      } else {  // WRITE Response: ADDR_LSB VALUE
 
       }
 
-          /* Checksum: (TYPE + ADDR_MSB + ADDR_LSB + VALUE) & 0xFF */
-        let chk = (param.mem + param.addr + uData.res[1].at(0)) & 0xFF;
-        if (chk === uData.res[0].at(0)) {
-          print("Checksum is correct");
-          return res[1];
-        } else {
-          print("Checksum is wrong");
-          return null;
-        }
+
     }
   },
+
 
   _handleNext: function () {
     let MAX_TENTATIVES = 2;
@@ -154,6 +156,11 @@ let Pellet = {
         this._transmit();
       }
     }
+  },
+
+
+  _isValidByte: function (byte) {
+    return (byte % 1 === 0 && byte >= 0x00 && byte <= 0xFF) ? true : false
   }
 
 };
