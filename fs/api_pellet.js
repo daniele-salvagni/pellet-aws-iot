@@ -187,15 +187,3 @@ let Pellet = {
   }
 
 };
-
-/* TO-DELETE
-let P937 = {
-  stage:      { mem: 0x00, addr: 0x21, mult: 1, off: 0 }, // Stove current stage
-  ambientTmp: { mem: 0x00, addr: 0x01, mult: 2, off: 0 }, // Remote temperature
-  probeTmp:   { mem: 0x00, addr: 0x44, mult: 1, off: 0 }, // Probe temperature
-  targetTmp:  { mem: 0x20, addr: 0x7D, mult: 1, off: 0 }, // Set temperature
-  power:      { mem: 0x20, addr: 0x7F, mult: 1, off: 0 }, // Set power level
-  fanLeft:    { mem: 0x20, addr: 0x81, mult: 1, off: 0 }, // Set fan speed (left)
-  fanRight:   { mem: 0x20, addr: 0x82, mult: 1, off: 0 } // Set fan speed (right)
-};
-*/
