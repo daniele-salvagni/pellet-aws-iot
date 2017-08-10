@@ -10,7 +10,7 @@ let RingBuffer = {
   // print("First command: ", rBuffer.poll());
   // ```
   create: function (size) {
-    return p = Object.create({
+    return Object.create({
       offer: RingBuffer.offer,
       poll: RingBuffer.poll,
       peek: RingBuffer.peek,
@@ -32,24 +32,28 @@ let RingBuffer = {
   offer: function (e) {
     if (this._isFull()) return false;
     this.buffer[this.head] = e;
-    this.head = ++this.head % this.size;
+    // this.head = ++this.head % this.size;
+    this.head = this.head + 1; // mJS BUG FIX
+    this.head %= this.size;
     return true;
   },
 
   // ## **`rBuffer.peek()`**
   // Return, but do not remove, the head of the queue.
   peek: function () {
-    if (RingBuffer._isEmpty()) return null;
+    if (this._isEmpty()) return null;
     return this.buffer[this.tail];
   },
 
   // ## **`rBuffer.poll()`**
   // Remove and return the head of the queue, if empty return null.
   poll: function () {
-    if (RingBuffer._isEmpty()) return null;
+    if (this._isEmpty()) return null;
     let e = this.buffer[this.tail];
     this.buffer[this.tail] = undefined;
-    this.tail = ++this.tail % this.size
+    // this.tail = ++this.tail % this.size;
+    this.tail = this.tail + 1; // mJS BUG FIX
+    this.tail %= this.size;
     return e;
   },
 
