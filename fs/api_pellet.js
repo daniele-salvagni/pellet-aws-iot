@@ -17,7 +17,9 @@ let Pellet = {
 
       // PRIVATE
       _findParameter: Pellet._findParameter,
+      _paramToStr: Pellet._paramToStr,
       _handleNext: Pellet._handleNext,
+      _transmit: Pellet._transmit,
 
       uartNo: uartNo,
       cfg: cfg || DEFAULT_CFG,
@@ -27,7 +29,8 @@ let Pellet = {
       commands: RingBuffer.create(16), // FIFO queue for the commands to send
       busy: false, // True if waiting for a response (Half-Duplex)
       timer: null, // The ID of the timeout timer
-      error: 0 // 0: no error | 1: timeout | 2: wrong response
+      error: 0, // 0: no error | 1: timeout | 2: wrong response
+      tentatives: 0
     });
 
     // UART Configuration
@@ -47,8 +50,8 @@ let Pellet = {
     if (!param) return false;
 
     // Offer a read command: [READ, param]
-    commands.offer([this.cfg.READ, param]);
-    if (!busy) this._transmit();
+    this.commands.offer([this.cfg.READ, param]); // TODO: Store strParam (maybe objects?)
+    if (!this.busy) this._transmit();
   },
 
 
@@ -65,7 +68,7 @@ let Pellet = {
     if (!Pellet._isValidByte(byteValue)) return false;
 
     // Offer a write command: [WRITE, param, value]
-    commands.offer([this.cfg.WRITE, param, byteValue]);
+    this.commands.offer([this.cfg.WRITE, param, byteValue]);
     if (!busy) this._transmit();
     return true;
   },
@@ -74,15 +77,15 @@ let Pellet = {
   // ## **`pellet.getState()`**
   // Return the last updated state of the device (or an empty object).
   getState: function () {
-
+    return this.state;
   },
 
 
   // PRIVATE -----------------------------------------------------------------------------
 
-  _findParameter: function (param) {
+  _findParameter: function (strParam) {
     for (let key in this.parameters) {
-      if (key === param) return this.parameters[key];
+      if (key === strParam) return this.parameters[key];
     }
     return false;
   },
@@ -94,8 +97,7 @@ let Pellet = {
     this.busy = true;
     let cmd = this.commands.peek();
 
-    // READ Bytes (2): (OPERATION + MEMORY) ADDR_LSB
-    txData = chr(cmd[0] + cmd[1].mem) + chr(cmd[1].addr);
+    let txData = chr(cmd[0] + cmd[1].mem) + chr(cmd[1].addr);
     // If it is a write command we need to add a value and a checksum.
     if (cmd[0] === this.cfg.WRITE) {
       // Checksum: (OPERATION + MEMORY) + ADDR_LSB + VALUE) & 0xFF
@@ -112,7 +114,7 @@ let Pellet = {
     this.timer = Timer.set(1000, false, function(that) {
       //that.timer = null;
       that.error = 1;
-      that.tentatives++;
+      that.tentatives = that.tentatives + 1; // mJS BUG FIX
       that._handleNext();
     }, this);
   },
@@ -121,7 +123,7 @@ let Pellet = {
   // Invoked only via callback
   _rxHandler: function (uartNo, that) {
     let MIN_RESPONSE_BYTES = 2; // All the expected responses should be 2 bytes
-    // Check that this callback has been called because there is space available in the
+    // Check that this callback has been called because there is data available in the
     // rx buffer. (It could be also for space available on the tx buffer)
     let ra = UART.readAvail(uartNo);
     if (ra >= MIN_RESPONSE_BYTES) {
@@ -132,21 +134,23 @@ let Pellet = {
       if (!cmd) return; // We received data for no reason (or too late), exit.
       // READ Response: CHECKSUM VALUE
       // WRITE Response: ADDR_LSB VALUE
-      let rxChecksum = rxData[0];
-      let rxValue = rxData[1];
+      let rxChecksum = rxData.at(0);
+      let rxValue = rxData.at(1);
 
       let chk = (cmd[0] === that.cfg.READ) ?
         ((cmd[0] + cmd[1].mem) + cmd[1].addr + rxValue) & 0xFF :
         cmd[1].addr[0];
 
-      if (rxChecksum.at(0) === chk) {
-        that.state[cmd.name] = rxValue; // TODO: convert back the value
+      if (rxChecksum === chk) {
+        print("Checksum is OK");
+        that.state[cmd[2]] = rxValue; // TODO: convert back the value
       } else {
+        print("Checksum is NO");
         that.error = 2;
       }
 
-      Timer.cancel(that.timer); // Cancel the timeout timer
-      that.tentatives++;
+      Timer.del(that.timer); // Cancel the timeout timer
+      that.tentatives = that.tentatives + 1; // mJS BUG FIX
       that._handleNext();
 
     }
@@ -155,7 +159,7 @@ let Pellet = {
 
   _handleNext: function () {
     let MAX_TENTATIVES = 2;
-    this.tentatives++;
+    that.tentatives = that.tentatives + 1; // mJS BUG FIX
     // Retry if an error occurred and we have another tentative
     let retry = (this.error && this.tentatives < MAX_TENTATIVES);
 
@@ -187,7 +191,7 @@ let Pellet = {
 /* TO-DELETE
 let P937 = {
   stage:      { mem: 0x00, addr: 0x21, mult: 1, off: 0 }, // Stove current stage
-  ambientTmp: { mem: 0x00, addr: 0x01, mult: 1, off: 0 }, // Remote temperature
+  ambientTmp: { mem: 0x00, addr: 0x01, mult: 2, off: 0 }, // Remote temperature
   probeTmp:   { mem: 0x00, addr: 0x44, mult: 1, off: 0 }, // Probe temperature
   targetTmp:  { mem: 0x20, addr: 0x7D, mult: 1, off: 0 }, // Set temperature
   power:      { mem: 0x20, addr: 0x7F, mult: 1, off: 0 }, // Set power level
